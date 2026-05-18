@@ -1,6 +1,7 @@
 import pygame
 from random import randint
 import numpy as np
+import math
 
 # game loop
 class CarGame:
@@ -24,6 +25,7 @@ class CarGame:
 
         # Solve state
         self.solving = False
+        self.previous_move = (0, 1)
 
         # game window set up, extra row for score board
         self.screen = pygame.display.set_mode((self.cell_cols * self.cell_size, 
@@ -44,11 +46,14 @@ class CarGame:
         self.move()
         self.draw_player()
 
-        # get player input
-        self.events()
-        
         # draw apple
         self.apple()
+
+        # get player input
+        self.events()
+        self.solver()
+        
+
 
         # draw score count
         score = self.font.render(f'score: {self.score}', True, (0, 0, 0), (255, 255, 255))
@@ -70,7 +75,192 @@ class CarGame:
     
     def solver(self):
         """ Markov Decision Process Solving handler """
-        pass
+
+        # ========== Helpers ==========
+        def list_to_tuple_array(listarray):
+            """ Converts game (x, y) orientation to MDP (y, x) orientation """
+            if isinstance(listarray, tuple):
+                new_list = list(tuple(listarray))
+            else:
+                new_list = listarray.copy()
+
+            out_list = [new_list[1], new_list[0]]
+
+            return tuple(out_list)
+        
+
+        def is_valid(pos):
+            """ Action validity check handler """
+            r, c = pos
+            if r < 0 or r >= map.shape[0]:
+                return False
+            if c < 0 or c >= map.shape[1]:
+                return False
+            if map[r, c] == 1:
+                return False
+            return True
+
+
+        def choose_action(state):
+            """ Exploration vs exploitation handler """
+            if np.random.random() < epsilon:
+                return np.random.randint(len(actions))
+            else:
+                return np.argmax(Q[state])
+            
+        
+        def get_optimal_path(Q, start, goal, actions, maze, max_steps=15):
+            """ Best actions/optimal path handler """
+            path = [start]
+            state = start
+            move_series = []
+            visited = set() # Prohibits retracing steps (actions provided already prevents retracing)
+
+            for _ in range(max_steps):
+                if state == goal:
+                    break
+                visited.add(state)
+
+                best_action = None
+                best_value = -float('inf')
+
+                for idx, move in enumerate(actions):
+                    next_state = (state[0] + move[0], state[1] + move[1])
+
+                    if (0 <= next_state[0] < maze.shape[0] and
+                        0 <= next_state[1] < maze.shape[1] and
+                        maze[next_state] == 0 and
+                            next_state not in visited):
+
+                        if Q[state][idx] > best_value:
+                            best_value = Q[state][idx]
+                            best_action = idx
+
+                if best_action is None:
+                    break
+                
+
+                move = actions[best_action]
+                move_series.append(move)
+
+                state = (state[0] + move[0], state[1] + move[1])
+                path.append(state)
+
+            return path, move_series
+        
+        # environment simulation
+        map = np.array([[0] * self.cell_cols] * self.cell_rows)
+
+        snake_body = self.player_body       
+
+        # player and apple position in environment simulation
+        start = list_to_tuple_array(snake_body[0])
+        goal = list_to_tuple_array(self.apple_pos)
+
+        # distance between start and goal
+        start_dist = math.dist(start, goal)
+
+        # current heading direction
+        direction = list_to_tuple_array(self.player_direction)
+
+        # snake body as obstacles (collision check func condition)
+        for part in snake_body:
+            if part != list(start):
+                part = list_to_tuple_array(part)
+                map[part[0]][part[1]] = 1
+
+        num_episodes = 100  # number of navigation attempts
+        alpha = 0.1         # learning rate: how much new info overrides old info
+        gamma = 0.9         # discount factor: more weight to immediate rewards
+        epsilon = 0.5       # exploration vs exploitation probability
+
+        # NOTE: can be rewards or penalty, will affect design of downstream processes
+        reward_fire = -10       # out of bounds penalty
+        reward_goal = 50        # reach apple reward
+        reward_close = 50       # getting closer to apple reward
+        reward_far = -10        # getting farther from apple reward
+        reward_step = -1        # action taking penalty
+
+        # all possible actions (direction func condition applied)
+        actions = [(0, -1), (0, 1), (-1, 0), (1, 0)]  
+
+        if direction == (0, 1):
+            actions.remove((0, -1))
+        elif direction == (0, -1):
+            actions.remove((0, 1))
+        elif direction == (1, 0):
+            actions.remove((-1, 0))
+        elif direction == (-1, 0):
+            actions.remove((1, 0))
+
+        # Q table: stores expected rewards and is updated as agent learns
+        Q = np.zeros(map.shape + (len(actions),))
+            
+        # environment navigation sampling/experimentation
+        rewards_all_episodes = []
+
+        for episode in range(num_episodes):
+            state = start
+            total_rewards = 0
+            done = False
+            min_dist = start_dist
+
+            while not done:
+                # action and next state
+                action_index = choose_action(state)
+                action = actions[action_index]
+
+                next_state = (state[0] + action[0], state[1] + action[1])
+                next_dist = math.dist(next_state, goal)
+
+                # NOTE: reward/penalty system design determined by how rewards/penalty are used
+                if not is_valid(next_state):
+                    reward = reward_fire
+                    done = True
+                elif next_state == goal:
+                    reward = reward_goal
+                    done = True
+                elif next_dist <= min_dist:
+                    reward = reward_close
+                elif next_dist > min_dist:
+                    reward = reward_far
+                    done = True
+                else:
+                    reward = reward_step
+
+                # MDP policy formula
+                old_value = Q[state][action_index]
+                next_max = np.max(Q[next_state]) if is_valid(next_state) else 0
+
+                Q[state][action_index] = old_value + alpha * \
+                    (reward + gamma * next_max - old_value)
+
+                # new state for next actions
+                state = next_state
+                total_rewards += reward
+
+            epsilon = max(0.01, epsilon * 0.995)
+            rewards_all_episodes.append(total_rewards)
+
+        # get optimal actions/path
+        optimal_path, actions = get_optimal_path(Q, start, goal, actions, map)
+
+        # NOTE: Solver occasionally produces no action: set default action as previous action chosen
+        # Hypothesis: model cannot find a suitable action to choose: produces no action
+        if len(actions) == 0:
+            actions = [self.previous_move]
+        else:
+            self.previous_move = actions[0]
+
+        # control player snake
+        if actions[0] == (0, 1):
+            self.direction('d')
+        elif actions[0] == (0, -1):
+            self.direction('a')
+        elif actions[0] == (-1, 0): # reverse y axis direction due to flipped simulated environment
+            self.direction('w')
+        elif actions[0] == (1, 0):  # reverse y axis direction due to flipped simulated environment
+            self.direction('s')
 
 
     def draw_board(self):
@@ -97,7 +287,9 @@ class CarGame:
         for i, part in enumerate(self.player_body):
         
             # alternate
-            if i % 2 == 0:
+            if i == 0:
+                colour = (150, 0, 150)
+            elif i % 2 == 0:
                 colour = (0, 0, 180)
             else:
                 colour = (0, 0, 100)
@@ -136,7 +328,12 @@ class CarGame:
                         self.direction('a')
                     elif event.key == pygame.K_d:
                         self.direction('d')
-
+                    elif event.key == pygame.K_l:
+                        while True:
+                            for event in pygame.event.get():
+                                if event.type == pygame.KEYDOWN:
+                                    if event.key == pygame.K_k:
+                                        break
                 # restart game
                 if self.gameover_state:
                     if event.key == pygame.K_f:
