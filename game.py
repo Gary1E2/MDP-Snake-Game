@@ -20,8 +20,9 @@ class CarGame:
         self.score = 0
         self.gameover_state = False
 
-        # obstacle data
+        # apple data
         self.apple_pos = [-33, -33]
+        self.eaten = False
 
         # Solve state
         self.solving = False
@@ -53,8 +54,6 @@ class CarGame:
         self.events()
         self.solver()
         
-
-
         # draw score count
         score = self.font.render(f'score: {self.score}', True, (0, 0, 0), (255, 255, 255))
         scoreRect = score.get_rect()
@@ -72,7 +71,6 @@ class CarGame:
         # if not self.solving:
         #     self.solver()
 
-    
     def solver(self):
         """ Markov Decision Process Solving handler """
 
@@ -87,6 +85,14 @@ class CarGame:
             out_list = [new_list[1], new_list[0]]
 
             return tuple(out_list)
+        
+
+        def avg_obstacle_dist(start_pt):
+            avg_dist_list = []
+            for part in snake_body:
+                avg_dist_list.append(math.dist(start_pt, part))
+
+            return np.mean(avg_dist_list)
         
 
         def is_valid(pos):
@@ -157,13 +163,15 @@ class CarGame:
         start = list_to_tuple_array(snake_body[0])
         goal = list_to_tuple_array(self.apple_pos)
 
-        # distance between start and goal
+        # distance between start and goal + avg distances
         start_dist = math.dist(start, goal)
+        start_obs_dist = avg_obstacle_dist(start)
 
         # current heading direction
         direction = list_to_tuple_array(self.player_direction)
 
         # snake body as obstacles (collision check func condition)
+        print(snake_body)
         for part in snake_body:
             if part != list(start):
                 part = list_to_tuple_array(part)
@@ -179,6 +187,7 @@ class CarGame:
         reward_goal = 50        # reach apple reward
         reward_close = 50       # getting closer to apple reward
         reward_far = -10        # getting farther from apple reward
+        reward_obstacle = -30
         reward_step = -1        # action taking penalty
 
         # all possible actions (direction func condition applied)
@@ -212,6 +221,7 @@ class CarGame:
 
                 next_state = (state[0] + action[0], state[1] + action[1])
                 next_dist = math.dist(next_state, goal)
+                next_obs_dist = avg_obstacle_dist(next_state)
 
                 # NOTE: reward/penalty system design determined by how rewards/penalty are used
                 if not is_valid(next_state):
@@ -227,6 +237,9 @@ class CarGame:
                     done = True
                 else:
                     reward = reward_step
+
+                if next_obs_dist < start_obs_dist:
+                    reward += reward_obstacle
 
                 # MDP policy formula
                 old_value = Q[state][action_index]
@@ -374,13 +387,44 @@ class CarGame:
 
     def apple(self):
         """ Simple apple creation """
+        def valid_player_body(axis):
+            """ Validity check for adding body part to player """
+            
+            # find valid body adding positions in corresponding axis before appending to player body
+            if axis == 0:  
+                for dir in [-1, 1]:
+                    if not ((0 > self.player_body[-1][0] + dir) or 
+                        (self.cell_cols - 1 < self.player_body[-1][0] + dir)):
+                        self.player_body.append([self.player_body[-1][0] + dir, 
+                                                 self.player_body[-1][1]])
+
+            if axis == 1:
+                for dir in [-1, 1]:
+                    if not ((0 > self.player_body[-1][0] + dir) or 
+                        (self.cell_rows - 1 < self.player_body[-1][0] + dir)):
+                        self.player_body.append([self.player_body[-1][0], 
+                                                 self.player_body[-1][1] + dir])
+
         
         # if player head and apple overlap and apple not eaten yet: add 1 to score
         if self.apple_pos == self.player_body[0] and not self.eaten:
             self.score += 1
-            self.player_body.append([self.player_body[-1][0] + self.player_direction[0], 
-                                     self.player_body[-1][1] + self.player_direction[1]])
             self.eaten = True
+
+        # check if appending normally will result in body part being out of bounds
+        if self.eaten:
+            if ((1 > self.player_body[-1][0] and self.player_direction == (1, 0)) or 
+                (self.cell_cols - 2 < self.player_body[-1][0] and self.player_direction == (-1, 0))):
+                valid_player_body(1)
+
+            elif ((1 > self.player_body[-1][1] and self.player_direction == (0, 1)) or 
+                (self.cell_rows - 2 < self.player_body[-1][1]) and self.player_direction == (0, -1)):
+                valid_player_body(0)
+            
+            # appending normally if safe to do so
+            else:
+                self.player_body.append([self.player_body[-1][0] + self.player_direction[0], 
+                                         self.player_body[-1][1] + self.player_direction[1]])
 
         # if game start or apple is eaten: create new apple
         if self.apple_pos == [-33, -33] or self.eaten:
