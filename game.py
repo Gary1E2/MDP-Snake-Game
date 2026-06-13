@@ -4,7 +4,7 @@ import numpy as np
 import math
 
 # game loop
-class CarGame:
+class SnakeGame:
     def __init__(self):
         # init pygame
         pygame.init()
@@ -31,7 +31,7 @@ class CarGame:
         # game window set up, extra row for score board
         self.screen = pygame.display.set_mode((self.cell_cols * self.cell_size, 
                                                (self.cell_rows + 1) * self.cell_size))
-        pygame.display.set_caption("Car Game")
+        pygame.display.set_caption("Snake Game")
 
         # font setting
         self.font = pygame.font.Font('freesansbold.ttf', 32)
@@ -465,7 +465,7 @@ class CarGame:
             self.events()
                 
 
-game = CarGame()
+game = SnakeGame()
 
 # game loop
 while True:
