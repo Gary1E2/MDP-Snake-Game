@@ -341,12 +341,13 @@ class SnakeGame:
                         self.direction('a')
                     elif event.key == pygame.K_d:
                         self.direction('d')
-                    elif event.key == pygame.K_l:
-                        while True:
-                            for event in pygame.event.get():
-                                if event.type == pygame.KEYDOWN:
-                                    if event.key == pygame.K_k:
-                                        break
+                    # debug/freeze
+                    # elif event.key == pygame.K_l:
+                    #     while True:
+                    #         for event in pygame.event.get():
+                    #             if event.type == pygame.KEYDOWN:
+                    #                 if event.key == pygame.K_k:
+                    #                     break
                 # restart game
                 if self.gameover_state:
                     if event.key == pygame.K_f:
